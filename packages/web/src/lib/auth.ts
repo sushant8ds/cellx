@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { createContext, useContext, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 export const TOKEN_KEY = 'udcp_token';
@@ -38,7 +38,16 @@ export function parseToken(token: string): TokenPayload | null {
   }
 }
 
-export function useAuth() {
+interface AuthContextType {
+  user: TokenPayload | null;
+  isAuthenticated: boolean;
+  login: (token: string) => void;
+  logout: () => void;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<TokenPayload | null>(() => {
     const token = getToken();
     return token ? parseToken(token) : null;
@@ -56,10 +65,19 @@ export function useAuth() {
     navigate('/login');
   }
 
-  return {
-    user,
-    isAuthenticated: user !== null,
-    login,
-    logout,
-  };
+  return React.createElement(
+    AuthContext.Provider,
+    { value: { user, isAuthenticated: user !== null, login, logout } },
+    children
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error(
+      'useAuth must be used within an AuthProvider. Wrap your app inside <AuthProvider> in main.tsx.'
+    );
+  }
+  return context;
 }

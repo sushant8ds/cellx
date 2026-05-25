@@ -32,15 +32,19 @@ describe('Property 31: Dashboard Count Accuracy', () => {
           const { pool } = await import('../db/pool') as unknown as { pool: { query: ReturnType<typeof vi.fn> } };
           vi.clearAllMocks();
 
-          // Build mock records with known status distributions
-          const rows: { data: Record<string, unknown> }[] = [
-            ...Array(safe).fill(null).map(() => ({ data: { status: 'Safe' } })),
-            ...Array(warning).fill(null).map(() => ({ data: { status: 'Warning' } })),
-            ...Array(danger).fill(null).map(() => ({ data: { status: 'Danger' } })),
-            ...Array(overdue).fill(null).map(() => ({ data: { status: 'Overdue' } })),
-          ];
+          const total = safe + warning + danger + overdue;
 
-          pool.query.mockResolvedValueOnce({ rows, rowCount: rows.length });
+          // First query: GROUP BY aggregation — returns one row per distinct status value
+          const groupByRows: { status_val: string; cnt: string }[] = [
+            ...Array(safe > 0 ? 1 : 0).fill(null).map(() => ({ status_val: 'Safe', cnt: String(safe) })),
+            ...Array(warning > 0 ? 1 : 0).fill(null).map(() => ({ status_val: 'Warning', cnt: String(warning) })),
+            ...Array(danger > 0 ? 1 : 0).fill(null).map(() => ({ status_val: 'Danger', cnt: String(danger) })),
+            ...Array(overdue > 0 ? 1 : 0).fill(null).map(() => ({ status_val: 'Overdue', cnt: String(overdue) })),
+          ];
+          pool.query
+            .mockResolvedValueOnce({ rows: groupByRows, rowCount: groupByRows.length })
+            // Second query: total COUNT(*)
+            .mockResolvedValueOnce({ rows: [{ cnt: String(total) }], rowCount: 1 });
 
           const counts = await getDashboardCounts(tenantId);
 
@@ -49,7 +53,7 @@ describe('Property 31: Dashboard Count Accuracy', () => {
           expect(counts.warning).toBe(warning);
           expect(counts.danger).toBe(danger);
           expect(counts.overdue).toBe(overdue);
-          expect(counts.total).toBe(safe + warning + danger + overdue);
+          expect(counts.total).toBe(total);
         },
       ),
       { numRuns: 100 },
@@ -65,8 +69,11 @@ describe('Property 31: Dashboard Count Accuracy', () => {
           const { pool } = await import('../db/pool') as unknown as { pool: { query: ReturnType<typeof vi.fn> } };
           vi.clearAllMocks();
 
-          const rows = Array(n).fill(null).map(() => ({ data: { some_field: 'value' } }));
-          pool.query.mockResolvedValueOnce({ rows, rowCount: n });
+          // GROUP BY returns no rows (no status values matched)
+          pool.query
+            .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+            // Total COUNT(*) returns n
+            .mockResolvedValueOnce({ rows: [{ cnt: String(n) }], rowCount: 1 });
 
           const counts = await getDashboardCounts(tenantId);
 

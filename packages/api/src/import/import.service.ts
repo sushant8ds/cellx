@@ -104,6 +104,7 @@ export async function processImport(
   rows: Record<string, string>[],
   mapping: Record<string, string>, // sourceColumn -> fieldId
   schema: DynamicField[],
+  collectionId?: string, // optional — required when collection_id is NOT NULL
 ): Promise<ImportSummary> {
   const schemaMap = new Map(schema.map((f) => [f.id, f]));
   const errors: Array<{ row: number; reason: string }> = [];
@@ -145,19 +146,122 @@ export async function processImport(
     if (rowValid) validRows.push(data);
   }
 
-  // Bulk INSERT in batches of 500
+  // Bulk INSERT using unnest() — single round-trip regardless of row count.
   let imported = 0;
-  const BATCH = 500;
-  for (let b = 0; b < validRows.length; b += BATCH) {
-    const batch = validRows.slice(b, b + BATCH);
-    for (const data of batch) {
+  if (validRows.length > 0) {
+    const tenantIds = validRows.map(() => tenantId);
+    const dataValues = validRows.map((d) => JSON.stringify(d));
+
+    if (collectionId) {
+      // Include collection_id when provided (required after 002_collections migration)
+      const collectionIds = validRows.map(() => collectionId);
       await pool.query(
-        `INSERT INTO records (tenant_id, data) VALUES ($1, $2)`,
-        [tenantId, JSON.stringify(data)],
+        `INSERT INTO records (tenant_id, data, collection_id)
+         SELECT * FROM unnest($1::uuid[], $2::jsonb[], $3::uuid[])`,
+        [tenantIds, dataValues, collectionIds],
       );
-      imported++;
+    } else {
+      await pool.query(
+        `INSERT INTO records (tenant_id, data)
+         SELECT * FROM unnest($1::uuid[], $2::jsonb[])`,
+        [tenantIds, dataValues],
+      );
     }
+    imported = validRows.length;
   }
 
   return { imported, skipped: errors.length, errors };
+}
+
+// ---------------------------------------------------------------------------
+// importFromGoogleSheet
+// Downloads a publicly shared Google Spreadsheet as CSV and pipes it through
+// the existing parseFile → processImport pipeline.
+//
+// Requirements:
+//   - The sheet must be shared as "Anyone with the link can view"
+//   - Uses the Google Visualization API CSV export endpoint (no auth required)
+//   - For private sheets, swap the endpoint for an authenticated googleapis
+//     JWT client using a Google Service Account key
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts the spreadsheet ID from a Google Sheets sharing URL.
+ * Handles all common URL formats:
+ *   https://docs.google.com/spreadsheets/d/{ID}/edit
+ *   https://docs.google.com/spreadsheets/d/{ID}/pub
+ *   https://docs.google.com/spreadsheets/d/{ID}
+ */
+export function extractSpreadsheetId(url: string): string | null {
+  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return match ? match[1] : null;
+}
+
+export interface GoogleSheetImportResult {
+  headers: string[];
+  rowCount: number;
+  imported: number;
+  skipped: number;
+  errors: Array<{ row: number; reason: string }>;
+}
+
+export async function importFromGoogleSheet(
+  tenantId: string,
+  sheetUrl: string,
+  collectionId: string,
+  mapping: Record<string, string>,
+  schema: DynamicField[],
+): Promise<GoogleSheetImportResult> {
+  const spreadsheetId = extractSpreadsheetId(sheetUrl);
+  if (!spreadsheetId) {
+    throw new ImportError('Invalid Google Spreadsheet URL. Make sure it contains /spreadsheets/d/{ID}.');
+  }
+
+  // Google Visualization API: exports the first sheet as CSV without authentication.
+  // The sheet must be shared with "Anyone with the link can view".
+  const csvEndpoint =
+    `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv`;
+
+  let csvText: string;
+  try {
+    // Use the built-in fetch (Node 18+) to avoid adding an axios dependency
+    const response = await fetch(csvEndpoint, {
+      headers: { 'User-Agent': 'CellX-Import/1.0' },
+      signal: AbortSignal.timeout(30_000), // 30 s timeout
+    });
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new ImportError(
+          'Google Sheets returned 403. Make sure the sheet is shared with "Anyone with the link can view".',
+        );
+      }
+      throw new ImportError(`Google Sheets request failed with status ${response.status}.`);
+    }
+
+    csvText = await response.text();
+  } catch (err) {
+    if (err instanceof ImportError) throw err;
+    throw new ImportError(
+      `Failed to fetch Google Spreadsheet. Check the URL and sharing settings. (${String(err)})`,
+    );
+  }
+
+  // Enforce the same 50 MB size limit as file uploads
+  const csvBuffer = Buffer.from(csvText, 'utf-8');
+  if (csvBuffer.length > MAX_FILE_SIZE) {
+    throw new ImportError('Google Spreadsheet is too large. Maximum size is 50 MB.');
+  }
+
+  // Reuse the existing CSV parser
+  const parsed = await parseFile(csvBuffer, 'google_sheet.csv');
+
+  // Run through the same validation + bulk unnest() INSERT pipeline
+  const summary = await processImport(tenantId, parsed.rows, mapping, schema, collectionId);
+
+  return {
+    headers: parsed.headers,
+    rowCount: parsed.rows.length,
+    ...summary,
+  };
 }

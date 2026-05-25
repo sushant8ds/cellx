@@ -87,8 +87,8 @@ describe('Property 8: Import Row Count Accuracy', () => {
           const { pool } = await import('../db/pool') as unknown as { pool: { query: ReturnType<typeof vi.fn> } };
           vi.clearAllMocks();
 
-          // Mock INSERT to succeed
-          pool.query.mockResolvedValue({ rows: [], rowCount: 1 });
+          // Mock the single unnest() bulk INSERT to succeed
+          pool.query.mockResolvedValue({ rows: [], rowCount: n - k });
 
           // Build N rows: first K have invalid integer values, rest are valid
           const rows: Record<string, string>[] = [];
@@ -115,6 +115,10 @@ describe('Property 8: Import Row Count Accuracy', () => {
           expect(summary.imported).toBe(n - k);
           expect(summary.skipped).toBe(k);
           expect(summary.errors).toHaveLength(k);
+
+          // Bulk insert: pool.query called at most once (zero times if all rows invalid)
+          const validCount = n - k;
+          expect(pool.query).toHaveBeenCalledTimes(validCount > 0 ? 1 : 0);
         },
       ),
       { numRuns: 100 },

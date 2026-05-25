@@ -24,26 +24,34 @@ const STATUS_MAP: Record<string, keyof Omit<DashboardCounts, 'total'>> = {
 };
 
 export async function getDashboardCounts(tenantId: string): Promise<DashboardCounts> {
-  // Fetch all active records and count by status field value
-  const result = await pool.query(
-    `SELECT data FROM records WHERE tenant_id = $1 AND is_deleted = false`,
-    [tenantId],
+  // Aggregate status counts in the database using GROUP BY.
+  // jsonb_each_text expands every key/value in the data JSONB column so we can
+  // match status-like values without pulling rows into Node.js memory.
+  const result = await pool.query<{ status_val: string; cnt: string }>(
+    `SELECT kv.value AS status_val, COUNT(*) AS cnt
+     FROM records r,
+          LATERAL jsonb_each_text(r.data) AS kv(key, value)
+     WHERE r.tenant_id = $1
+       AND r.is_deleted = false
+       AND kv.value = ANY($2::text[])
+     GROUP BY kv.value`,
+    [tenantId, Object.keys(STATUS_MAP)],
   );
 
   const counts: DashboardCounts = { safe: 0, warning: 0, danger: 0, overdue: 0, total: 0 };
 
-  for (const row of result.rows as { data: Record<string, unknown> }[]) {
-    counts.total++;
-    // Look for any field with a status-like value
-    for (const value of Object.values(row.data)) {
-      const strVal = String(value ?? '');
-      const category = STATUS_MAP[strVal];
-      if (category) {
-        counts[category]++;
-        break; // count each record once
-      }
-    }
+  for (const row of result.rows) {
+    const category = STATUS_MAP[row.status_val];
+    if (category) counts[category] += parseInt(row.cnt, 10);
   }
+
+  // Total is a separate lightweight COUNT — avoids double-counting records
+  // that might have multiple status-like values in different fields.
+  const totalResult = await pool.query<{ cnt: string }>(
+    `SELECT COUNT(*) AS cnt FROM records WHERE tenant_id = $1 AND is_deleted = false`,
+    [tenantId],
+  );
+  counts.total = parseInt(totalResult.rows[0].cnt, 10);
 
   return counts;
 }

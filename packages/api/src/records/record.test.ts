@@ -82,8 +82,10 @@ describe('Property 25: Filter Correctness', () => {
           expect(pool.query).toHaveBeenCalledOnce();
           const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0] as [string, unknown[]];
 
-          // SQL must contain the fieldId filter
-          expect(sql).toContain(fieldId);
+          // With parameterized ->> the field ID is a bind parameter, not in the SQL string.
+          // Verify it appears in the params array and the SQL uses the ->> operator.
+          expect(sql).toContain('->>');
+          expect(params).toContain(fieldId);
           // The value must appear in the params array
           expect(params).toContain(value);
 
@@ -129,11 +131,15 @@ describe('Property 26: Multi-Column Sort Correctness', () => {
 
           await listRecords(tenantId, { sortBy });
 
-          const [sql] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0] as [string, unknown[]];
+          const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0] as [string, unknown[]];
 
-          // Each field must appear in the ORDER BY clause with the correct direction
+          // With parameterized ->>, field names are bind parameters not in the SQL string.
+          // Verify the SQL uses ->> and each field/direction appears in params or SQL.
+          expect(sql).toContain('->>');
           for (const { field, dir } of sortParts) {
-            expect(sql.toLowerCase()).toContain(field.toLowerCase());
+            // Field name is a bind parameter
+            expect(params).toContain(field);
+            // Direction is safe to interpolate (validated to ASC/DESC only)
             expect(sql.toUpperCase()).toContain(dir.toUpperCase());
           }
         },

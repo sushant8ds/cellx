@@ -111,11 +111,13 @@ export async function evaluateAlertRule(
     throw new Error('Invalid target_field_id format');
   }
 
+  // Use parameterized JSONB key access: data -> $2 returns jsonb, ->> $2 returns text.
+  // The field ID is passed as a bind parameter — never interpolated into the query string.
   const recordsResult = await pool.query(
     `SELECT id FROM records
      WHERE tenant_id = $1 AND is_deleted = false
-       AND (data->>'${rule.target_field_id}')::text ${sqlOp} $2`,
-    [tenantId, rule.threshold],
+       AND (data ->> $2)::text ${sqlOp} $3`,
+    [tenantId, rule.target_field_id, rule.threshold],
   );
 
   const triggeredRecordIds = recordsResult.rows.map((r: { id: string }) => r.id);

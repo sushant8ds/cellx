@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { AuthMiddleware, TenantIsolationMiddleware } from '../middleware/auth.middleware';
 import { requirePermission } from '../middleware/rbac.middleware';
-import { parseFile, inferDataType, processImport, ImportError } from './import.service';
+import { parseFile, inferDataType, processImport, importFromGoogleSheet, ImportError } from './import.service';
 import { scanFile, applyCleaningToRows, type CleaningOptions } from './preprocessing';
 import { generateDataProfile } from '../ai/ai.service';
 import { getSchema } from '../schema/schema.service';
@@ -166,3 +166,79 @@ importRouter.get('/:tenantId/jobs/:jobId', async (req: Request, res: Response): 
     res.json(result.rows[0]);
   } catch { res.status(500).json({ error: 'Internal server error' }); }
 });
+
+// ---------------------------------------------------------------------------
+// POST /tenants/:tenantId/imports/google-sheets
+// Fetch a publicly shared Google Spreadsheet and import its rows.
+//
+// Body: {
+//   url:      string  — full Google Sheets sharing URL
+//   mapping:  Record<string, string>  — sourceColumn -> fieldId (optional;
+//             if omitted, rows are stored with raw column names as keys)
+// }
+// ---------------------------------------------------------------------------
+importRouter.post('/:tenantId/imports/google-sheets', requirePermission('import'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const tenantId = req.params['tenantId'] as string;
+      const { url, mapping = {} } = req.body as {
+        url: string;
+        mapping?: Record<string, string>;
+      };
+
+      if (!url?.trim()) {
+        res.status(400).json({ error: 'url is required' });
+        return;
+      }
+
+      // Create a collection entry to track this Google Sheet
+      const collectionResult = await pool.query(
+        `INSERT INTO collections (tenant_id, name, source_type)
+         VALUES ($1, $2, 'google_sheets') RETURNING id, name, source_type, created_at`,
+        [tenantId, url.trim()],
+      );
+      const collection = collectionResult.rows[0] as {
+        id: string; name: string; source_type: string; created_at: Date;
+      };
+
+      // Create a background job to track progress
+      const jobResult = await pool.query(
+        `INSERT INTO background_jobs (tenant_id, type, status, progress_percent, created_by)
+         VALUES ($1, 'import', 'processing', 10, $2) RETURNING id`,
+        [tenantId, req.user?.userId ?? '00000000-0000-0000-0000-000000000000'],
+      );
+      const jobId = jobResult.rows[0].id as string;
+
+      // Fetch the schema for mapping validation
+      const { getSchema } = await import('../schema/schema.service');
+      const schema = await getSchema(tenantId);
+
+      // Download + parse + bulk insert
+      const result = await importFromGoogleSheet(
+        tenantId,
+        url.trim(),
+        collection.id,
+        mapping,
+        schema,
+      );
+
+      await pool.query(
+        `UPDATE background_jobs SET status='completed', progress_percent=100,
+         metadata=$1 WHERE id=$2`,
+        [JSON.stringify({ headers: result.headers, rowCount: result.rowCount, importSummary: result }), jobId],
+      );
+
+      res.status(201).json({
+        jobId,
+        collection,
+        headers: result.headers,
+        rowCount: result.rowCount,
+        imported: result.imported,
+        skipped: result.skipped,
+        errors: result.errors,
+      });
+    } catch (err) {
+      if (err instanceof ImportError) { res.status(400).json({ error: err.message }); return; }
+      res.status(500).json({ error: String(err) });
+    }
+  });

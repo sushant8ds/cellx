@@ -2,3 +2,6 @@ node_modules
 dist
 .env
 *.local
+.DS_Store
+packages/.DS_Store
+packages/web/src/.DS_Store

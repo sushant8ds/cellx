@@ -119,16 +119,17 @@ export async function listRecords(
   }
 
   // Filters: data->>'fieldId' = value
+  // Use parameterized ->> operator to avoid SQL injection on field IDs.
   if (options.filters) {
     for (const [fieldId, value] of Object.entries(options.filters)) {
-      const sanitizedFieldId = fieldId.replace(/[^a-zA-Z0-9_-]/g, '');
-      whereClause += ` AND data->>'${sanitizedFieldId}' = $${paramIdx}`;
-      params.push(value);
-      paramIdx++;
+      whereClause += ` AND data ->> $${paramIdx} = $${paramIdx + 1}`;
+      params.push(fieldId, value);
+      paramIdx += 2;
     }
   }
 
-  // Sort
+  // Sort — field names go through parameterized ->> to avoid injection.
+  // Direction is validated to only 'ASC' or 'DESC' so it's safe to interpolate.
   let orderClause = 'ORDER BY updated_at DESC, id DESC';
   if (options.sortBy) {
     const parts = options.sortBy.split(',').map((s) => s.trim()).filter(Boolean);
@@ -136,8 +137,9 @@ export async function listRecords(
     for (const part of parts) {
       const [field, dir] = part.split(':');
       const direction = dir?.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
-      const sanitizedField = field.replace(/[^a-zA-Z0-9_-]/g, '');
-      orderParts.push(`data->>'${sanitizedField}' ${direction}`);
+      orderParts.push(`data ->> $${paramIdx} ${direction}`);
+      params.push(field);
+      paramIdx++;
     }
     if (orderParts.length > 0) {
       orderClause = `ORDER BY ${orderParts.join(', ')}`;
@@ -348,4 +350,79 @@ export async function restoreRecord(
   await writeAuditLog(tenantId, actorUserId ?? SYSTEM_ACTOR, recordId, 'restore');
 
   return record;
+}
+
+// ---------------------------------------------------------------------------
+// joinArbitraryCollections
+// Performs a cross-collection INNER JOIN inside PostgreSQL using JSONB field
+// values as the join key. Both field IDs must be UUIDs (schema-mapped fields).
+// For raw column header names use the import → confirm flow first to get
+// proper field IDs from dynamic_fields.
+// ---------------------------------------------------------------------------
+
+export interface FileLinkConfig {
+  leftCollectionId: string;
+  rightCollectionId: string;
+  leftFieldId: string;   // UUID of a dynamic_field — used as the JSONB key
+  rightFieldId: string;  // UUID of a dynamic_field — used as the JSONB key
+}
+
+export interface JoinedRecord {
+  id: string;
+  data: Record<string, unknown>;
+}
+
+export async function joinArbitraryCollections(
+  tenantId: string,
+  config: FileLinkConfig,
+): Promise<JoinedRecord[]> {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if (
+    !uuidRegex.test(config.leftCollectionId) ||
+    !uuidRegex.test(config.rightCollectionId) ||
+    !uuidRegex.test(config.leftFieldId) ||
+    !uuidRegex.test(config.rightFieldId)
+  ) {
+    throw new Error('Invalid collection or schema field reference identifiers.');
+  }
+
+  // All four identifiers are parameterized — no string interpolation.
+  // The join condition uses ->> $3 and ->> $4 so field IDs never touch the
+  // query string directly.
+  const { rows } = await pool.query<{
+    left_id: string;
+    right_id: string;
+    left_data: Record<string, unknown>;
+    right_data: Record<string, unknown>;
+  }>(
+    `SELECT
+       r1.id   AS left_id,
+       r2.id   AS right_id,
+       r1.data AS left_data,
+       r2.data AS right_data
+     FROM records r1
+     INNER JOIN records r2
+       ON (r1.data ->> $3) = (r2.data ->> $4)
+     WHERE r1.tenant_id    = $1
+       AND r2.tenant_id    = $1
+       AND r1.collection_id = $2
+       AND r2.collection_id = $5
+       AND r1.is_deleted   = false
+       AND r2.is_deleted   = false`,
+    [
+      tenantId,
+      config.leftCollectionId,
+      config.leftFieldId,
+      config.rightFieldId,
+      config.rightCollectionId,
+    ],
+  );
+
+  // Merge both sides into a flat record. Right-side keys win on collision so
+  // the caller can control precedence by choosing which side is "left".
+  return rows.map((row) => ({
+    id: `${row.left_id}_joined_${row.right_id}`,
+    data: { ...row.left_data, ...row.right_data },
+  }));
 }

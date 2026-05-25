@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth';
 const navItems = [
   { path: '/dashboard', label: '📊 Dashboard' },
   { path: '/grid', label: '📋 Records' },
+  { path: '/solver', label: '🗓️ Exam Allocation' },
   { path: '/configurator', label: '⚙️ Configurator' },
 ];
 
