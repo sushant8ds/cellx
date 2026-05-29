@@ -74,7 +74,7 @@ export default function LoginPage() {
         email, tenantSlug, code: otp, password, fullName,
       });
       login(data.token);
-      navigate('/dashboard');
+      navigate('/onboarding');
     } catch (err: unknown) {
       setError((err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Invalid OTP');
     } finally { setLoading(false); }

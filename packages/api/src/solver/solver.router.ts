@@ -6,6 +6,7 @@ import {
   createConstraintRule, getConstraintRules, updateConstraintRule, deleteConstraintRule,
   type ConstraintType,
 } from './solver.service';
+import { buildProblemFromWizard, type ExamWizardAnswers } from './solver-wizard.service';
 import { pool } from '../db/pool';
 
 export const solverRouter = Router();
@@ -150,6 +151,28 @@ solverRouter.post('/:tenantId/solver/assignments/:id/override', requirePermissio
 
       res.json({ updated: result.rows[0], violations });
     } catch { res.status(500).json({ error: 'Internal server error' }); }
+  });
+
+// ---------------------------------------------------------------------------
+// Wizard Run — plain-language answers → constraint rules → solver
+// ---------------------------------------------------------------------------
+
+solverRouter.post('/:tenantId/solver/wizard', requirePermission('schema:write'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const tenantId = req.params['tenantId'] as string;
+      const answers = req.body as ExamWizardAnswers;
+
+      if (!answers.classrooms || !answers.slotsPerDay || !answers.examDays) {
+        res.status(400).json({ error: 'classrooms, slotsPerDay, and examDays are required' });
+        return;
+      }
+
+      const result = await buildProblemFromWizard(tenantId, answers);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
   });
 
 // ---------------------------------------------------------------------------

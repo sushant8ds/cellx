@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { AuthMiddleware, TenantIsolationMiddleware } from '../middleware/auth.middleware';
 import { requirePermission } from '../middleware/rbac.middleware';
 import { chat, clearSession, type DataProfile } from './ai.service';
+import { getSmartSuggestions } from './smart-suggestions';
 import { randomUUID } from 'crypto';
 
 export const aiRouter = Router();
@@ -50,4 +51,25 @@ aiRouter.delete('/:tenantId/ai/sessions/:sessionId', requirePermission('schema:w
   (req: Request, res: Response): void => {
     clearSession(req.params['tenantId'] as string, req.params['sessionId'] as string);
     res.status(204).send();
+  });
+
+// POST /tenants/:tenantId/ai/analyze
+// Analyzes a data profile and returns smart domain suggestions + questions
+// Called immediately after file upload — no LLM needed, pure heuristics
+aiRouter.post('/:tenantId/ai/analyze', requirePermission('schema:write'),
+  (req: Request, res: Response): void => {
+    const { dataProfile } = req.body as { dataProfile: DataProfile };
+    if (!dataProfile?.columns?.length) {
+      res.status(400).json({ error: 'dataProfile with columns is required' });
+      return;
+    }
+
+    const columns = dataProfile.columns.map(c => c.name);
+    const sampleValues: Record<string, string[]> = {};
+    for (const col of dataProfile.columns) {
+      sampleValues[col.name] = col.sampleValues ?? [];
+    }
+
+    const suggestions = getSmartSuggestions(columns, sampleValues);
+    res.json(suggestions);
   });
