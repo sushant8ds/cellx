@@ -110,7 +110,7 @@ describe('Property 8: Import Row Count Accuracy', () => {
           }];
 
           const mapping = { col_a: 'field-a' };
-          const summary = await processImport('tenant-1', rows, mapping, schema);
+          const summary = await processImport('tenant-1', rows, mapping, schema, '00000000-0000-0000-0000-000000000000');
 
           expect(summary.imported).toBe(n - k);
           expect(summary.skipped).toBe(k);

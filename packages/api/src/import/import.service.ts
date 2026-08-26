@@ -152,21 +152,31 @@ export async function processImport(
     const tenantIds = validRows.map(() => tenantId);
     const dataValues = validRows.map((d) => JSON.stringify(d));
 
-    if (collectionId) {
-      // Include collection_id when provided (required after 002_collections migration)
-      const collectionIds = validRows.map(() => collectionId);
-      await pool.query(
-        `INSERT INTO records (tenant_id, data, collection_id)
-         SELECT * FROM unnest($1::uuid[], $2::jsonb[], $3::uuid[])`,
-        [tenantIds, dataValues, collectionIds],
+    let finalCollectionId = collectionId;
+    if (!finalCollectionId) {
+      // Check if a default collection already exists for this tenant
+      const existingColl = await pool.query(
+        `SELECT id FROM collections WHERE tenant_id = $1 AND name = $2 LIMIT 1`,
+        [tenantId, 'Imported Records']
       );
-    } else {
-      await pool.query(
-        `INSERT INTO records (tenant_id, data)
-         SELECT * FROM unnest($1::uuid[], $2::jsonb[])`,
-        [tenantIds, dataValues],
-      );
+      if (existingColl?.rows && existingColl.rows.length > 0) {
+        finalCollectionId = existingColl.rows[0].id;
+      } else {
+        const newColl = await pool.query(
+          `INSERT INTO collections (tenant_id, name, source_type)
+           VALUES ($1, $2, 'upload') RETURNING id`,
+          [tenantId, 'Imported Records']
+        );
+        finalCollectionId = newColl?.rows?.[0]?.id ?? '00000000-0000-0000-0000-000000000000';
+      }
     }
+
+    const collectionIds = validRows.map(() => finalCollectionId);
+    await pool.query(
+      `INSERT INTO records (tenant_id, data, collection_id)
+       SELECT * FROM unnest($1::uuid[], $2::jsonb[], $3::uuid[])`,
+      [tenantIds, dataValues, collectionIds],
+    );
     imported = validRows.length;
   }
 

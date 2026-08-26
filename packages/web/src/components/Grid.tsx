@@ -44,9 +44,9 @@ interface ActiveCell {
 
 function rowBg(status: string): string {
   const s = status.toLowerCase();
-  if (s === 'safe') return '#d1fae5';
-  if (s === 'warning' || s === 'near limit') return '#fef9c3';
-  if (s === 'danger' || s === 'overdue' || s === 'calibration required') return '#fee2e2';
+  if (s === 'safe' || s === 'present' || s === 'pass' || s === 'a') return '#d1fae5';
+  if (s === 'warning' || s === 'near limit' || s === 'borrowed' || s === 'b' || s === 'c') return '#fef9c3';
+  if (s === 'danger' || s === 'overdue' || s === 'calibration required' || s === 'absent' || s === 'fail' || s === 'f') return '#fee2e2';
   return '';
 }
 

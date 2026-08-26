@@ -242,9 +242,9 @@ async function callLLM(messages: Array<{ role: string; content: string }>): Prom
 // System prompt
 // ---------------------------------------------------------------------------
 
-function buildSystemPrompt(dataProfile?: DataProfile): string {
+function buildSystemPrompt(dataProfile?: DataProfile, jobId?: string): string {
   const profileSection = dataProfile
-    ? `\nThe user has uploaded: **${dataProfile.filename}** (${dataProfile.rowCount} rows)\nColumns detected: ${dataProfile.columns.map(c => `${c.name} (${c.inferredType})`).join(', ')}\nSample values: ${dataProfile.columns.slice(0, 4).map(c => `${c.name}: [${c.sampleValues.slice(0, 3).join(', ')}]`).join(' | ')}`
+    ? `\nThe user has uploaded: **${dataProfile.filename}** (${dataProfile.rowCount} rows)\nColumns detected: ${dataProfile.columns.map(c => `${c.name} (${c.inferredType})`).join(', ')}\nSample values: ${dataProfile.columns.slice(0, 4).map(c => `${c.name}: [${c.sampleValues.slice(0, 3).join(', ')}]`).join(' | ')}${jobId ? `\nActive import job ID: ${jobId}` : ''}`
     : '';
 
   return `You are an expert data system architect embedded in CellX — a no-code data platform.
@@ -309,8 +309,16 @@ export async function* chat(
 
   history.push({ role: 'user', content: userMessage });
 
+  // Query latest import job ID for the tenant
+  const { pool } = await import('../db/pool');
+  const jobRes = await pool.query(
+    `SELECT id FROM background_jobs WHERE tenant_id = $1 AND type = 'import' ORDER BY created_at DESC LIMIT 1`,
+    [tenantId],
+  );
+  const jobId = jobRes.rows[0]?.id as string | undefined;
+
   const messages = [
-    { role: 'system', content: buildSystemPrompt(dataProfile) },
+    { role: 'system', content: buildSystemPrompt(dataProfile, jobId) },
     ...history,
   ];
 

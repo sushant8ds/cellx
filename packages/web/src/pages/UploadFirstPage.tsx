@@ -373,6 +373,68 @@ Please set everything up automatically. Create all the necessary columns, formul
               </label>
             </div>
 
+            <div style={{ marginTop: 24, borderTop: '1px solid #e5e7eb', paddingTop: 20 }}>
+              <p style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12, textAlign: 'center' }}>
+                🎓 New to spreadsheets? Choose a fun student template to get started:
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {[
+                  {
+                    title: '🎒 Student Marks & Grades',
+                    desc: 'Grades, average calculations & fail checks',
+                    csv: "Student Name,Subject,Marks,Grade\nRahul Sharma,Mathematics,92,A\nPriya Patel,Mathematics,45,C\nAmit Kumar,Science,32,F\nSneha Reddy,Science,78,B\nVikram Singh,English,88,A\nNeha Gupta,English,28,F\nRohan Das,Mathematics,34,F\nAnanya Sen,Science,65,B"
+                  },
+                  {
+                    title: '📅 Class Attendance Tracker',
+                    desc: 'Track attendance and flag low attendance',
+                    csv: "Student Name,Class Date,Status,Section\nRahul Sharma,2026-06-01,Present,A\nPriya Patel,2026-06-01,Present,A\nAmit Kumar,2026-06-01,Absent,A\nSneha Reddy,2026-06-01,Present,A\nVikram Singh,2026-06-02,Present,A\nNeha Gupta,2026-06-02,Absent,A\nRohan Das,2026-06-02,Absent,A"
+                  },
+                  {
+                    title: '🧪 Science Lab Inventory',
+                    desc: 'Monitor stocks & alert on hazardous items',
+                    csv: "Chemical Name,Formula,Stock Quantity,Expiry Date,Status\nHydrochloric Acid,HCl,50,2026-09-01,Safe\nSodium Hydroxide,NaOH,12,2026-12-01,Warning\nSulfuric Acid,H2SO4,5,2026-05-15,Danger\nCalcium Carbonate,CaCO3,120,2028-01-01,Safe"
+                  },
+                  {
+                    title: '📚 Library Books Tracker',
+                    desc: 'Due dates, checkout records & overdue alerts',
+                    csv: "Book Title,Borrower Name,Borrow Date,Due Date,Status\nTo Kill a Mockingbird,Rahul Sharma,2026-05-10,2026-05-24,Overdue\n1984,Priya Patel,2026-06-01,2026-06-15,Borrowed\nThe Great Gatsby,Amit Kumar,2026-06-05,2026-06-19,Borrowed"
+                  }
+                ].map(tmpl => (
+                  <button
+                    key={tmpl.title}
+                    onClick={() => {
+                      const file = new File([tmpl.csv], tmpl.title.replace(/[^a-zA-Z]/g, '') + '_Template.csv', { type: 'text/csv' });
+                      handleFile(file);
+                    }}
+                    style={{
+                      background: '#f9fafb',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 10,
+                      padding: '12px 14px',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease-in-out',
+                    }}
+                    onMouseOver={e => {
+                      e.currentTarget.style.borderColor = '#10b981';
+                      e.currentTarget.style.background = '#f0fdf4';
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                      e.currentTarget.style.boxShadow = '0 2px 6px rgba(16, 185, 129, 0.08)';
+                    }}
+                    onMouseOut={e => {
+                      e.currentTarget.style.borderColor = '#e5e7eb';
+                      e.currentTarget.style.background = '#f9fafb';
+                      e.currentTarget.style.transform = 'none';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }}
+                  >
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{tmpl.title}</div>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{tmpl.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {uploadError && (
               <div style={{ marginTop: 16, padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, fontSize: 13, color: '#dc2626' }}>
                 {uploadError}
@@ -584,7 +646,7 @@ Please set everything up automatically. Create all the necessary columns, formul
             </p>
 
             {/* Summary of what was built */}
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '14px 18px', marginBottom: 28, textAlign: 'left' }}>
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '14px 18px', marginBottom: 20, textAlign: 'left' }}>
               {buildLog
                 .filter(e => e.type === 'tool_result')
                 .slice(0, 6)
@@ -593,6 +655,31 @@ Please set everything up automatically. Create all the necessary columns, formul
                     <span>✓</span> {e.content}
                   </div>
                 ))}
+            </div>
+
+            {/* Educational guide for students */}
+            <div style={{
+              background: '#f9fafb',
+              border: '1px dashed #d1d5db',
+              borderRadius: 12,
+              padding: '16px 20px',
+              textAlign: 'left',
+              marginBottom: 28,
+            }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, color: '#374151', margin: '0 0 10px' }}>
+                🎓 Spreadsheet Basics: What did the AI just build?
+              </h4>
+              <ul style={{ fontSize: 12, color: '#4b5563', paddingLeft: 18, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <li>
+                  <strong>📋 Dynamic Columns:</strong> Columns act as containers for different types of information, such as student names (text), dates, or scores (numbers).
+                </li>
+                <li>
+                  <strong>🧮 Auto-calculating Formulas:</strong> The AI wrote formula logic for your spreadsheet (like a calculator). If you double-click any cell in the grid and edit its value, the target calculation columns (e.g. Pass/Fail, average) will recalculate instantly!
+                </li>
+                <li>
+                  <strong>🚨 Alert Highlight Rules:</strong> AI set up thresholds to scan your data. If a row meets the alert criteria (e.g. marks below 35), CellX automatically highlights the entire row in red to flag a warning.
+                </li>
+              </ul>
             </div>
 
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
